@@ -16,6 +16,10 @@ QueueAutomator provides a clean decorator API to get started with multiprocessin
 
 - All the code that manages queues, spawning and joining processes is already implemented, so you can focus on the task at hand.
 
+How it works:
+
+![QueueDiagram](./img/QueueDiagram.jpg)
+
 ### Example
 
 #### Using only 1 worker function
