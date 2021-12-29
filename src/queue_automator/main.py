@@ -158,7 +158,7 @@ class QueueAutomator:
             Callable: The wrapped function after registering it.
         """
 
-        self.__validate_non_empty_args((input_queue_name, process_count))
+        self.__validate_non_empty_args((input_queue_name, process_count, output_queue_name))
 
         if input_queue_name in self.__queue_table:
             raise RuntimeError(f'{input_queue_name} already exists in queue table, pick another name')
