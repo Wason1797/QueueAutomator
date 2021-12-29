@@ -60,14 +60,18 @@ class QueueAutomator:
         }
 
     def __generate_queues(self, queues: list, manager: SyncManager, name: str):
-        if name not in self.__queue_table:
-            raise RuntimeError(f'{name} does not exist in queue map, register a worker function with input_queue_name={name}')
-
         if name == QueueNames.OUTPUT:
             self.__queue_table[name]['queue'] = manager.Queue(0)
             return
 
+        if name not in self.__queue_table:
+            raise RuntimeError(f'{name} does not exist in queue map, register a worker function with input_queue_name={name}')
+
         current_queue = self.__queue_table[name]
+
+        if current_queue.get('queue'):
+            raise RuntimeError(f'{name} was already created, you may be creating a circular pipeline')
+
         next_queue = current_queue['target']
         current_queue['queue'] = manager.JoinableQueue()
         queues.append((name, next_queue))
@@ -137,7 +141,7 @@ class QueueAutomator:
         """
         self.input_data = input_data
 
-    def register_as_worker_function(self, input_queue_name: str = QueueNames.INPUT, output_queue_name: Union[str, None] = None, process_count: int = 1) -> Callable:
+    def register_as_worker_function(self, input_queue_name: str = QueueNames.INPUT, output_queue_name: str = QueueNames.OUTPUT, process_count: int = 1) -> Callable:
         """
         Decorator to register your functions to process data as part of a multiprocessing queue pipeline
 
