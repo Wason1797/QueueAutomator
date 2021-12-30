@@ -33,7 +33,7 @@ automator = QueueAutomator()
 
 # Register a worker function (if input_queue_name and output_queue_name are not provided
 # they will default to 'input' and 'output' respectively). 'input' and 'output'
-# are necesary to mark the start and ending of your pipeline
+# are necessary  to mark the start and ending of your pipeline
 
 @automator.register_as_worker_function(process_count=2)
 def do_work(item: int) -> int:
