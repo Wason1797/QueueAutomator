@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="queue-automator",
-    version="0.0.1",
+    version="0.0.1rc",
     author="Wason1797",
     author_email="wabrborich@hotmail.com",
     description="A simple wrapper to build queue multiprocessing pipelines",
