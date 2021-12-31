@@ -18,7 +18,7 @@ QueueAutomator provides a clean decorator API to get started with multiprocessin
 
 How it works:
 
-![QueueDiagram](./img/QueueDiagram.jpg)
+![QueueDiagram](https://raw.githubusercontent.com/Wason1797/QueueAutomator/develop/img/QueueDiagram.jpg)
 
 ### Example
 
