@@ -192,11 +192,11 @@ class QueueAutomator:
 
         self.__generate_queues(queues, manager, QueueNames.INPUT)
 
-        process_per_queue = {input_queue: self.__spawn_processes(input_queue, output_queue) for input_queue, output_queue in queues}
+        process_per_queue = tuple((input_queue, self.__spawn_processes(input_queue, output_queue)) for input_queue, output_queue in queues)
 
         self.__enqueue_input_data()
 
-        for queue_name, procesess in process_per_queue.items():
+        for queue_name, procesess in process_per_queue:
             current_queue = self.__queue_table[queue_name]
             current_queue['queue'].join()
             self.__signal_queue_exit(current_queue['queue'], current_queue['process_count'])
