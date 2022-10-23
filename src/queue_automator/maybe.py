@@ -19,6 +19,11 @@ class MaybeWrapper:
 
 
 class MultiprocessMaybe:
+    """
+    MultiprocessMaybe is a wrapper over QueueAutomator that provides an abstraction to chain worker functions.
+    With this wrapper yo don't need to worry about queue ordering. You can even insert data in intermediate queues.
+
+    """
 
     def __init__(self, nothing_check: Optional[Callable] = None) -> None:
         self.automator = QueueAutomator('MaybeAutomator')
@@ -36,11 +41,29 @@ class MultiprocessMaybe:
         return value
 
     def insert(self, data: Iterable) -> 'MultiprocessMaybe':
+        """ Use this method to insert data in the pipeline. 
+            The data will be inserted in the next available queue.
+
+        Args:
+            data (Iterable): Any iterablable with data you want to process
+
+        Returns:
+            MultiprocessMaybe: Another instance of MultiprocessingMaybe to chain operations
+        """
         last_stack_index = len(self.__call_stack)
         self.__inserted_data[last_stack_index] = data
         return self
 
     def then(self, func: Callable, process_count: Optional[int] = None) -> 'MultiprocessMaybe':
+        """Use this method to chain worker functions
+
+        Args:
+            func (Callable): Any worker function that can process data 
+            process_count (Optional[int], optional): The number of workers you want to assign to this function. Defaults to None.
+
+        Returns:
+            MultiprocessMaybe: _description_
+        """
         self.__call_stack.append((MaybeWrapper(func, self._is_nothing).maybe, process_count))
         return self
 
@@ -64,5 +87,15 @@ class MultiprocessMaybe:
         return result
 
     def maybe(self, func: Optional[Callable] = None, default: Any = None, process_count: Optional[int] = None) -> list:
+        """Use this method to execute the pipeline
+
+        Args:
+            func (Optional[Callable], optional): The lasst worker function, If you need one. Defaults to None.
+            default (Any, optional): The default value you want when any of your worker function returns None. Defaults to None.
+            process_count (Optional[int], optional): The number of workers you want to assign. Defaults to None.
+
+        Returns:
+            list: _description_
+        """
         self.__call_stack.append((MaybeWrapper(func or self._default_maybe_exec, self._is_nothing, default).maybe, process_count))
         return self.__exec_maybe()
