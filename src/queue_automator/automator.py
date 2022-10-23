@@ -1,7 +1,7 @@
 import logging
 from multiprocessing import JoinableQueue, Manager, Process, Queue
 from multiprocessing.managers import SyncManager
-from typing import Callable, Iterable, List, Union
+from typing import Callable, Dict, Iterable, List, Sequence, Union
 
 from .constants import QueueFlags, QueueNames
 
@@ -31,23 +31,23 @@ class QueueAutomator:
 
     """
 
-    def __init__(self, name: Union[str, None] = None) -> 'QueueAutomator':
-        self.__queue_table: dict = {
+    def __init__(self, name: Union[str, None] = None) -> None:
+        self.__queue_table: Dict[str, dict] = {
             QueueNames.OUTPUT: {
                 'target': None,
                 'process_count': None,
-                'worker_function': None
+                'worker_function': None,
+                'data': None
             },
         }
-        self.input_data = None
         self.name = name or ''
 
     def __repr__(self) -> str:
         return f'QueueAutomator[{self.name}]'
 
-    def __validate_non_empty_args(self, args: list):
+    def __validate_non_empty_args(self, args: Sequence) -> None:
         for arg in args:
-            if not args:
+            if not arg:
                 raise ValueError(f'{arg} should not be empty or zero')
 
     def __build_queue(self, name: str, target: str, process_count: int, worker_function: Callable) -> dict:
@@ -55,11 +55,12 @@ class QueueAutomator:
             name: {
                 'target': target,
                 'process_count': process_count,
-                'worker_function': worker_function
+                'worker_function': worker_function,
+                'data': None
             }
         }
 
-    def __generate_queues(self, queues: list, manager: SyncManager, name: str):
+    def __generate_queues(self, queues: list, manager: SyncManager, name: str) -> None:
         if name == QueueNames.OUTPUT:
             self.__queue_table[name]['queue'] = manager.Queue(0)
             return
@@ -73,23 +74,30 @@ class QueueAutomator:
             raise RuntimeError(f'{name} was already created, you may be creating a circular pipeline')
 
         next_queue = current_queue['target']
-        current_queue['queue'] = manager.JoinableQueue()
+        current_queue['queue'] = manager.JoinableQueue()  # type: ignore
         queues.append((name, next_queue))
 
         return self.__generate_queues(queues, manager, next_queue)
 
-    def __enqueue_input_data(self):
-        input_queue = self.__queue_table[QueueNames.INPUT].get('queue')
-        if not input_queue:
-            RuntimeError('enqueue_items was called before input queue was initialized, this should not happen')
+    def __enqueue_data(self) -> None:
 
-        if not self.input_data:
-            RuntimeError('input_data is empty, no data to process')
+        for queue_name, queue_data in self.__queue_table.items():
 
-        for item in self.input_data:
-            input_queue.put(item)
+            queue = queue_data.get('queue')
+            if not queue:
+                RuntimeError('enqueue_data was called for a non existent queue, this should not happen')
 
-    def _process_enqueued_objects(self, in_queue: JoinableQueue, out_queue: Queue, worker_function: Callable):
+            data = queue_data.get('data', [])
+            if not data:
+                if queue_name == QueueNames.INPUT:
+                    RuntimeError('data for input queue is empty, nothing to process')
+                continue
+
+            logger.debug(f'Inserting {len(data)} items in queue {queue_name}')
+            for item in data:
+                queue.put(item)  # type: ignore
+
+    def _process_enqueued_objects(self, in_queue: JoinableQueue, out_queue: Queue, worker_function: Callable) -> None:
 
         while True:
             input_object = in_queue.get()
@@ -116,15 +124,15 @@ class QueueAutomator:
 
         return process_list
 
-    def __join_processes(self, process_list: list):
+    def __join_processes(self, process_list: list) -> None:
         for process in process_list:
             process.join()
 
-    def __signal_queue_exit(self, queue: JoinableQueue, num_processes: int):
+    def __signal_queue_exit(self, queue: JoinableQueue, num_processes: int) -> None:
         for _ in range(num_processes):
             queue.put(QueueFlags.EXIT)
 
-    def __recover_from_queue(self, queue: Queue, manager=False) -> list:
+    def __recover_from_queue(self, queue: Queue, manager: bool = False) -> list:
         results = []
         while not queue.empty():
             results.append(queue.get())
@@ -132,16 +140,30 @@ class QueueAutomator:
                 queue.task_done()
         return results
 
-    def set_input_data(self, input_data: Iterable):
+    def set_data_for_queue(self, data: Iterable, queue: str) -> None:
+
+        logger.debug(f'Setting data for queue {queue}')
+
+        if queue == QueueNames.OUTPUT:
+            raise RuntimeError('trying to set data directly to the output queue')
+
+        if queue not in self.__queue_table:
+            raise RuntimeError('trying to set data to an unexistent queue')
+
+        self.__queue_table[queue]['data'] = data
+
+    def set_input_data(self, input_data: Iterable) -> None:
         """
-        This function is used to set the data to be processed in the pipeline
+        This function is used to set the data to be processed at the start of the pipeline
 
         Args:
             input_data (Iterable)
         """
-        self.input_data = input_data
+        self.set_data_for_queue(input_data, QueueNames.INPUT)
 
-    def register_as_worker_function(self, input_queue_name: str = QueueNames.INPUT, output_queue_name: str = QueueNames.OUTPUT, process_count: int = 1) -> Callable:
+    def register_as_worker_function(self, input_queue_name: str = QueueNames.INPUT,
+                                    output_queue_name: str = QueueNames.OUTPUT,
+                                    process_count: int = 1) -> Callable:
         """
         Decorator to register your functions to process data as part of a multiprocessing queue pipeline
 
@@ -188,13 +210,13 @@ class QueueAutomator:
         """
 
         manager = Manager()
-        queues = []
+        queues: List[tuple] = []
 
         self.__generate_queues(queues, manager, QueueNames.INPUT)
 
         process_per_queue = tuple((input_queue, self.__spawn_processes(input_queue, output_queue)) for input_queue, output_queue in queues)
 
-        self.__enqueue_input_data()
+        self.__enqueue_data()
 
         for queue_name, procesess in process_per_queue:
             current_queue = self.__queue_table[queue_name]
@@ -203,3 +225,13 @@ class QueueAutomator:
             self.__join_processes(procesess)
 
         return self.__recover_from_queue(self.__queue_table[QueueNames.OUTPUT]['queue'], True)
+
+    def reset(self) -> None:
+        self.__queue_table = {
+            QueueNames.OUTPUT: {
+                'target': None,
+                'process_count': None,
+                'worker_function': None,
+                'data': None
+            }
+        }
