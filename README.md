@@ -94,6 +94,46 @@ if __name__ == '__main__':
 
 ```
 
+### Using the MultiprocessingMaybe interface
+
+```python
+from queue_automator.maybe import MultiprocessMaybe
+
+
+def do_work(item: int) -> int:
+    sleep(2)
+    result = item*2
+    print(f'{item} times two {result}')
+    return result
+
+
+def do_work_2(item: int) -> int:
+    sleep(2)
+    result = item**2
+    print(f'{item} squared {result}')
+    return result
+
+
+def do_work_3(item: int) -> int:
+    sleep(2)
+    result = item**3
+    print(f'{item} cubed {result}')
+    return result
+
+
+if __name__ == '__main__':
+    result = MultiprocessMaybe() \
+        .insert(range(10)) \
+        .then(do_work) \
+        .insert(range(10, 20)) \
+        .then(do_work_2) \
+        .insert(range(20, 30)) \
+        .maybe(do_work_3, default=0)
+
+    print(result)
+
+```
+
 ## Cautions
 
 As with anything, this is not a silver bullet that gets rid of all problems using python multiprocessing
