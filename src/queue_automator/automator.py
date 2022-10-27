@@ -1,7 +1,7 @@
 import logging
 from multiprocessing import JoinableQueue, Manager, Process, Queue
 from multiprocessing.managers import SyncManager
-from typing import Callable, Dict, Iterable, List, Sequence, Union
+from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
 from .constants import QueueFlags, QueueNames
 
@@ -31,7 +31,7 @@ class QueueAutomator:
 
     """
 
-    def __init__(self, name: Union[str, None] = None) -> None:
+    def __init__(self, name: Optional[str] = None) -> None:
         self.__queue_table: Dict[str, dict] = {
             QueueNames.OUTPUT: {
                 'target': None,
@@ -41,6 +41,8 @@ class QueueAutomator:
             },
         }
         self.name = name or ''
+        self.interrupted: bool = False
+        self.__running_processes_and_queues: Optional[tuple] = None
 
     def __repr__(self) -> str:
         return f'QueueAutomator[{self.name}]'
@@ -100,14 +102,19 @@ class QueueAutomator:
     def _process_enqueued_objects(self, in_queue: JoinableQueue, out_queue: Queue, worker_function: Callable) -> None:
 
         while True:
-            input_object = in_queue.get()
-            if input_object != QueueFlags.EXIT:
-                result = worker_function(input_object)
-                out_queue.put(result)
+            try:
+                input_object = in_queue.get()
+                if input_object != QueueFlags.EXIT:
+                    result = worker_function(input_object)
+                    out_queue.put(result)
+                    in_queue.task_done()
+                else:
+                    in_queue.task_done()
+                    logger.debug('_>>> Done <<<_')
+                    return
+            except KeyboardInterrupt:
                 in_queue.task_done()
-            else:
-                in_queue.task_done()
-                logger.debug('_>>> Done <<<_')
+                logger.debug('_>> Interrupted <<_')
                 return
 
     def __spawn_processes(self, in_queue_name: str, out_queue_name: str) -> List[Process]:
@@ -128,6 +135,10 @@ class QueueAutomator:
         for process in process_list:
             process.join()
 
+    def __kill_processes(self, process_list: list) -> None:
+        for process in process_list:
+            process.kill()
+
     def __signal_queue_exit(self, queue: JoinableQueue, num_processes: int) -> None:
         for _ in range(num_processes):
             queue.put(QueueFlags.EXIT)
@@ -140,7 +151,28 @@ class QueueAutomator:
                 queue.task_done()
         return results
 
-    def set_data_for_queue(self, data: Iterable, queue: str) -> None:
+    def join_running_processes_and_queues(self) -> None:
+        if not self.__running_processes_and_queues:
+            raise RuntimeError('trying to stop an non running instance')
+
+        for queue_name, procesess in self.__running_processes_and_queues:
+            current_queue = self.__queue_table[queue_name]
+            current_queue['queue'].join()
+            self.__signal_queue_exit(current_queue['queue'], current_queue['process_count'])
+            self.__join_processes(procesess)
+
+        self.__running_processes_and_queues = None
+
+    def kill_running_processes_and_queues(self) -> None:
+        if not self.__running_processes_and_queues:
+            raise RuntimeError('trying to kill an non running instance')
+
+        for _, procesess in self.__running_processes_and_queues:
+            self.__kill_processes(procesess)
+
+        self.__running_processes_and_queues = None
+
+    def set_data_for_queue(self, data: Iterable, queue: str, imediate: bool = False) -> None:
 
         logger.debug(f'Setting data for queue {queue}')
 
@@ -152,6 +184,9 @@ class QueueAutomator:
 
         self.__queue_table[queue]['data'] = data
 
+        if imediate:
+            self.__enqueue_data()
+
     def set_input_data(self, input_data: Iterable) -> None:
         """
         This function is used to set the data to be processed at the start of the pipeline
@@ -160,6 +195,12 @@ class QueueAutomator:
             input_data (Iterable)
         """
         self.set_data_for_queue(input_data, QueueNames.INPUT)
+
+    def get_output(self) -> list:
+        if self.__running_processes_and_queues:
+            self.join_running_processes_and_queues()
+
+        return self.__recover_from_queue(self.__queue_table[QueueNames.OUTPUT]['queue'], True)
 
     def register_as_worker_function(self, input_queue_name: str = QueueNames.INPUT,
                                     output_queue_name: str = QueueNames.OUTPUT,
@@ -196,7 +237,7 @@ class QueueAutomator:
 
         return store_in_queue_table_wrapper
 
-    def run(self) -> list:
+    def run(self, forever: bool = False) -> Optional[list]:
         """
         Is the main entry point to execute your program
         with a multiprocessing queue pipeline.
@@ -215,18 +256,17 @@ class QueueAutomator:
         self.__generate_queues(queues, manager, QueueNames.INPUT)
 
         process_per_queue = tuple((input_queue, self.__spawn_processes(input_queue, output_queue)) for input_queue, output_queue in queues)
+        self.__running_processes_and_queues = process_per_queue
 
         self.__enqueue_data()
 
-        for queue_name, procesess in process_per_queue:
-            current_queue = self.__queue_table[queue_name]
-            current_queue['queue'].join()
-            self.__signal_queue_exit(current_queue['queue'], current_queue['process_count'])
-            self.__join_processes(procesess)
+        if not forever:
+            return self.get_output()
 
-        return self.__recover_from_queue(self.__queue_table[QueueNames.OUTPUT]['queue'], True)
+        return None
 
     def reset(self) -> None:
+        self.__running_processes_and_queues = None
         self.__queue_table = {
             QueueNames.OUTPUT: {
                 'target': None,
